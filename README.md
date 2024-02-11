@@ -2,9 +2,7 @@
 
 ### Playstation integration for Homebridge / HOOBS.
 
-_Hey Siri, turn on Playstation_ finally possible!
-
-[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+_Hey Siri, turn on PS5_ finally possible!
 
 <img src="https://github.com/NikDevx/homebridge-playstation/blob/master/PS5%20title%20change.gif?raw=true" width="200">
 
