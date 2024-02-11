@@ -9,7 +9,7 @@
       "pollInterval": {
         "title": "Poll Interval",
         "type": "integer",
-        "default": 5000,
+        "default": 60000,
         "description": "Determine how often should device information be fetched (in milliseconds)"
       },
       "PSNAWP": {
