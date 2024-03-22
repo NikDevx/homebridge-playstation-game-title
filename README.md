@@ -12,9 +12,14 @@ Most of the work is done by the amazing [playactor](https://github.com/dhleong/p
 ## Installation
 
 You can install it via Homebridge UI or manually using:
-
 ```bash
 npm -g homebridge-playstation-game-title
+```
+
+**Then <a target="_blank" href="https://www.python.org/downloads/">install python3</a>**
+
+And install pip3 requirements plugin
+```bash
 pip3 install PSNAWP
 ```
 
