@@ -1,6 +1,7 @@
+[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 # Homebridge Playstation
 
-### Playstation integration for Homebridge / HOOBS.
+### Playstation integration for Homebridge.
 
 _Hey Siri, turn on PS5_ finally possible!
 
