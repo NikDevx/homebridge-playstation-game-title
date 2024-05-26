@@ -27,15 +27,12 @@ def user_status():
         for user in accounts_ids:
             user_name = psnawp.user(account_id=user).account_id
             user_info = psnawp.user(account_id=user).get_presence()
-            if user == user_name:
-                if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] == "online":
-                    if "gameTitleInfoList" in user_info["basicPresence"]:
-                        game_id = user_info["basicPresence"]["gameTitleInfoList"][0]["npTitleId"]
-                        game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
-                    else:
-                        game_title = "Not playing"
+            if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] == "online" and user == user_name:
+                if "gameTitleInfoList" in user_info["basicPresence"]:
+                    game_id = user_info["basicPresence"]["gameTitleInfoList"][0]["npTitleId"]
+                    game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
                 else:
-                    game_title = "Offline status"
+                    game_title = "Not playing"
     else:
         if psnawp_code == "Your npsso code has expired or is incorrect. Please generate a new code!":
             game_title = "NPSSO code has expired or incorrect! Replace it!"
