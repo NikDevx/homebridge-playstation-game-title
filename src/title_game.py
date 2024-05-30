@@ -20,7 +20,7 @@ def user_status():
     accounts_id = sys_argvs[0].replace('["', '').replace('"]', '').replace('"', '')
     accounts_ids = accounts_id.split(',')
 
-    game_id = "CUSAXXXXXX"
+    # game_id = "CUSAXXXXXX"
     game_title = "Loading..."
 
     if psnawp:
@@ -30,12 +30,15 @@ def user_status():
             if user == user_name:
                 if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] == "online":
                     if "gameTitleInfoList" in user_info["basicPresence"]:
-                        game_id = user_info["basicPresence"]["gameTitleInfoList"][0]["npTitleId"]
+                        # game_id = user_info["basicPresence"]["gameTitleInfoList"][0]["npTitleId"]
                         game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
                     else:
                         game_title = "Not playing"
+
+                    break
                 else:
                     game_title = "Offline status"
+
     else:
         if psnawp_code == "Your npsso code has expired or is incorrect. Please generate a new code!":
             game_title = "NPSSO code has expired or incorrect! Replace it!"

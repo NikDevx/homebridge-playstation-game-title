@@ -1,7 +1,7 @@
 {
   "displayName": "Homebridge Playstation",
   "name": "homebridge-playstation-game-title",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Playstation integration for Homebridge",
   "license": "Apache-2.0",
   "repository": {
@@ -17,13 +17,13 @@
     "url": "https://github.com/NikDevx/homebridge-playstation-game-title/issues"
   },
   "author": {
-    "name": "Flavio De Stefano",
-    "email": "destefano.flavio@gmail.com",
-    "url": "https://www.kopiro.me"
+    "name": "Nik_dev",
+    "email": "info@smarty-house.shop",
+    "url": "https://smarty-house.shop"
   },
   "funding": {
     "type": "paypal",
-    "url": "https://www.paypal.me/kopiro"
+    "url": "https://www.paypal.me/NikDev"
   },
   "engines": {
     "node": ">=16.20.0",
