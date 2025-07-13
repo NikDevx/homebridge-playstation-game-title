@@ -1,4 +1,10 @@
 [![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+### 💜 Found this plugin helpful?
+
+Support future development by subscribing to my YouTube channels:
+
+👉 [Relaxing-V (Meditation)](https://www.youtube.com/@Relaxing-V)  
+👉 [Relaxing-NV (Nature & Sea)](https://www.youtube.com/@Relaxing-NV)
 # Homebridge Playstation
 
 ### Playstation integration for Homebridge.
