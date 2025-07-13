@@ -1,366 +1,229 @@
-import {
-    API,
-    Characteristic,
-    CharacteristicValue,
-    PlatformAccessory,
-    Service,
-} from "homebridge";
-import {Device} from "playactor/dist/device";
-import {
-    DeviceStatus,
-    IDiscoveredDevice,
-} from "playactor/dist/discovery/model";
 
-import {PlaystationPlatform} from "./playstationPlatform";
-import {PLUGIN_NAME} from "./settings";
-import {spawn} from 'child_process';
+import {
+  API,
+  Characteristic,
+  CharacteristicValue,
+  PlatformAccessory,
+  Service,
+} from 'homebridge';
 
-let title_game;
+import { Device } from 'playactor/dist/device';
+import { DeviceStatus, IDiscoveredDevice } from 'playactor/dist/discovery/model';
+
+import { PlaystationPlatform } from './playstationPlatform';
+import { PLUGIN_NAME } from './settings';
+import { spawn } from 'child_process';
 
 export class PlaystationAccessory {
-    private readonly accessory: PlatformAccessory;
-    private readonly tvService: Service;
+  private readonly accessory: PlatformAccessory;
+  private readonly tvService: Service;
+  private readonly api: API = this.platform.api;
+  private readonly Service: typeof Service = this.platform.Service;
+  private readonly Characteristic: typeof Characteristic = this.platform.Characteristic;
 
-    private readonly api: API = this.platform.api;
-    private readonly Service: typeof Service = this.platform.Service;
-    private readonly Characteristic: typeof Characteristic =
-        this.platform.Characteristic;
+  private lockUpdate = false;
+  private lockSetOn = false;
+  private tick: NodeJS.Timeout | undefined;
+  private lockTimeout: NodeJS.Timeout | undefined;
+  private readonly kLockTimeout = 20_000;
 
-    private lockUpdate = false;
-    private lockSetOn = false;
+  private titleIDs: string[] = [];
+  private dynamicTitleSource: Service | null = null;
+  private titleUpdateInterval: NodeJS.Timeout | null = null;
+  private lastTitle: string | null = null;
 
-    private tick: NodeJS.Timeout | undefined;
+  constructor(
+    private readonly platform: PlaystationPlatform,
+    private deviceInformation: IDiscoveredDevice,
+  ) {
+    const uuid = this.api.hap.uuid.generate(deviceInformation.id);
+    const deviceName = deviceInformation.name;
 
-    private lockTimeout: NodeJS.Timeout | undefined;
-    private readonly kLockTimeout = 20_000;
+    this.accessory = new this.api.platformAccessory(deviceName, uuid);
+    this.accessory.category = this.api.hap.Categories.TV_SET_TOP_BOX;
 
-    // list of titles that can be started through Home app
-    private titleIDs: unknown[] = [];
+    this.accessory.getService(this.Service.AccessoryInformation)!
+      .setCharacteristic(this.Characteristic.Manufacturer, 'Sony')
+      .setCharacteristic(this.Characteristic.Model, deviceInformation.type)
+      .setCharacteristic(this.Characteristic.SerialNumber, deviceInformation.id)
+      .setCharacteristic(this.Characteristic.FirmwareRevision, deviceInformation.systemVersion);
 
-    constructor(
-        private readonly platform: PlaystationPlatform,
-        private deviceInformation: IDiscoveredDevice
-    ) {
-        const uuid = this.api.hap.uuid.generate(deviceInformation.id);
-        const deviceName = deviceInformation.name;
+    this.tvService =
+      this.accessory.getService(this.Service.Television) ||
+      this.accessory.addService(this.Service.Television);
 
-        this.accessory = new this.api.platformAccessory<{
-            deviceInformation: IDiscoveredDevice;
-        }>(deviceName, uuid);
-        this.accessory.category = this.api.hap.Categories.TV_SET_TOP_BOX;
+    this.tvService
+      .setCharacteristic(this.Characteristic.ConfiguredName, deviceName)
+      .setCharacteristic(
+        this.Characteristic.SleepDiscoveryMode,
+        this.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE,
+      );
 
-        this.accessory
-            .getService(this.Service.AccessoryInformation)!
-            .setCharacteristic(this.Characteristic.Manufacturer, "Sony")
-            .setCharacteristic(this.Characteristic.Model, deviceInformation.type)
-            .setCharacteristic(this.Characteristic.SerialNumber, deviceInformation.id)
-            .setCharacteristic(
-                this.Characteristic.FirmwareRevision,
-                deviceInformation.systemVersion
-            );
+    this.tvService.getCharacteristic(this.Characteristic.Active)
+      .onSet(this.setOn.bind(this))
+      .onGet(this.getOn.bind(this));
 
-        this.tvService =
-            this.accessory.getService(this.Service.Television) ||
-            this.accessory.addService(this.Service.Television);
+    this.tvService.getCharacteristic(this.Characteristic.RemoteKey)
+      .onSet((newValue: CharacteristicValue) => {
+        this.platform.log.debug(`[${this.deviceInformation.id}] RemoteKey not implemented`, newValue);
+      });
 
-        this.tvService
-            .setCharacteristic(this.Characteristic.ConfiguredName, deviceName)
-            .setCharacteristic(
-                this.platform.Characteristic.SleepDiscoveryMode,
-                this.platform.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
-            );
+    this.tvService.setCharacteristic(this.Characteristic.ActiveIdentifier, 0);
 
-        this.tvService
-            .getCharacteristic(this.Characteristic.Active)
-            .onSet(this.setOn.bind(this))
-            .onGet(this.getOn.bind(this));
+    this.addTitle('PSAXXXX', 'Loading...', 0);
+    this.startTitleUpdateLoop();
 
-        // These characteristics are required but not implemented yet
-        this.tvService
-            .getCharacteristic(this.Characteristic.RemoteKey)
-            .onSet((newValue: CharacteristicValue) => {
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Set RemoteKey is not implemented yet`,
-                    newValue
-                );
-            });
+    this.tvService.getCharacteristic(this.Characteristic.ActiveIdentifier)
+      .onSet(this.setTitleSwitchState.bind(this));
 
-        this.tvService.setCharacteristic(this.Characteristic.ActiveIdentifier, 0);
+    this.tick = setInterval(
+      this.updateDeviceInformations.bind(this),
+      this.platform.config.pollInterval || 120000,
+    );
 
-        this.setTitle();
+    this.api.publishExternalAccessories(PLUGIN_NAME, [this.accessory]);
+  }
 
-        this.tvService
-            .getCharacteristic(this.Characteristic.ActiveIdentifier)
-            .onSet(this.setTitleSwitchState.bind(this));
+  private addTitle(titleId: string, titleName: string, index: number) {
+    const titleInputSource = new this.Service.InputSource(titleName, titleId);
+    titleInputSource
+      .setCharacteristic(this.Characteristic.Identifier, index)
+      .setCharacteristic(this.Characteristic.Name, titleName)
+      .setCharacteristic(this.Characteristic.ConfiguredName, titleName)
+      .setCharacteristic(this.Characteristic.IsConfigured, this.Characteristic.IsConfigured.NOT_CONFIGURED)
+      .setCharacteristic(this.Characteristic.InputSourceType, this.Characteristic.InputSourceType.APPLICATION)
+      .setCharacteristic(this.Characteristic.CurrentVisibilityState, this.Characteristic.CurrentVisibilityState.HIDDEN);
 
-        this.tick = setInterval(
-            this.updateDeviceInformations.bind(this),
-            this.platform.config.pollInterval || this.platform.kDefaultPollInterval
-        );
+    this.accessory.addService(titleInputSource);
+    this.tvService.addLinkedService(titleInputSource);
+    this.titleIDs.push(titleId);
+    this.dynamicTitleSource = titleInputSource;
+  }
 
-        this.api.publishExternalAccessories(PLUGIN_NAME, [this.accessory]);
-    }
+  private startTitleUpdateLoop() {
+    const PSNAWP = this.platform.config.PSNAWP || '';
+    const account_id = this.platform.config.account_id || [];
+    const polling = this.platform.config.pollInterval || 120000;
+    const account_ids: string[] = account_id.map((acc) => acc.id);
 
-    private setTitle() {
-        this.addTitle("PSAXXXX", "Loading...", 0);
-    }
+    if (this.titleUpdateInterval) clearInterval(this.titleUpdateInterval);
 
-    private addTitle(titleId: string, titleName: string, index: number) {
-        const titleInputSource = new this.Service.InputSource(titleName, titleId);
-        titleInputSource
-            .setCharacteristic(this.Characteristic.Identifier, index)
-            .setCharacteristic(this.Characteristic.Name, titleName)
-            .setCharacteristic(this.Characteristic.ConfiguredName, titleName)
-            .setCharacteristic(
-                this.Characteristic.IsConfigured,
-                this.Characteristic.IsConfigured.NOT_CONFIGURED
-            )
-            .setCharacteristic(
-                this.Characteristic.InputSourceType,
-                this.Characteristic.InputSourceType.APPLICATION
-            )
-            .setCharacteristic(
-                this.Characteristic.CurrentVisibilityState,
-                this.Characteristic.CurrentVisibilityState.HIDDEN
-            );
+    this.titleUpdateInterval = setInterval(() => {
+      const get_title = spawn('python3', [
+        '/usr/lib/node_modules/homebridge-playstation-game-title/dist/title_game.py',
+        PSNAWP,
+        JSON.stringify(account_ids),
+      ]);
 
-        this.accessory.addService(titleInputSource);
-        this.tvService.addLinkedService(titleInputSource);
-        this.titleIDs.push(titleId);
-        this.UpdateTitle(titleInputSource);
-    }
-
-    private UpdateTitle(titleInputSource) {
-        const PSNAWP = this.platform.config.PSNAWP || "";
-        const account_id = this.platform.config.account_id || [];
-        const polling = this.platform.config.pollInterval || 120000;
-        const account_ids: string[] = [];
-
-        account_id.forEach((title) => {
-            account_ids.push(title.id);
-        });
-
-        setInterval(() => {
-            const get_title = spawn('python3', ['/usr/lib/node_modules/homebridge-playstation-game-title/dist/title_game.py', PSNAWP, JSON.stringify(account_ids)]);
-            get_title.stdout.on('data', data => {
-                title_game = data.toString().replace(/(\r\n|\n|\r)/gm, "");
-                titleInputSource
-                    .setCharacteristic(this.Characteristic.Identifier, 0)
-                    .setCharacteristic(this.Characteristic.Name, title_game)
-                    .setCharacteristic(this.Characteristic.ConfiguredName, title_game)
-                    .setCharacteristic(
-                        this.Characteristic.IsConfigured,
-                        this.Characteristic.IsConfigured.NOT_CONFIGURED
-                    )
-                    .setCharacteristic(
-                        this.Characteristic.InputSourceType,
-                        this.Characteristic.InputSourceType.APPLICATION
-                    )
-                    .setCharacteristic(
-                        this.Characteristic.CurrentVisibilityState,
-                        this.Characteristic.CurrentVisibilityState.HIDDEN
-                    );
-            });
-        }, polling);
-    }
-
-    private async discoverDevice() {
-        // Wrapper to get the device and making sure you always call .discover() before using the device,
-        // otherwise you will get an "Error: Unexpected discovery message"
-        const device = Device.withId(this.deviceInformation.id);
-        this.deviceInformation = await device.discover();
-        return device;
-    }
-
-    private updateCharacteristics() {
-        this.tvService
-            .getCharacteristic(this.platform.Characteristic.Active)
-            .updateValue(this.deviceInformation.status === DeviceStatus.AWAKE);
-
-        const runningAppTitle = this.titleIDs.indexOf(
-            this.deviceInformation.extras["running-app-titleid"] || 0
-        );
-        this.tvService
-            .getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
-            .updateValue(runningAppTitle == -1 ? 0 : runningAppTitle);
-
-        this.platform.log.debug(
-            `[${this.deviceInformation.id}] Device status updated ${this.deviceInformation.status}`
-        );
-    }
-
-    private async updateDeviceInformations(force = false) {
-        if (this.lockUpdate && !force) {
-            return;
+      get_title.stdout.on('data', (data) => {
+        const newTitle = data.toString().trim();
+        if (newTitle && newTitle !== this.lastTitle && this.dynamicTitleSource) {
+          this.lastTitle = newTitle;
+          this.platform.log.info(`🎮 Updating title to: ${newTitle}`);
+          this.dynamicTitleSource
+            .setCharacteristic(this.Characteristic.Name, newTitle)
+            .setCharacteristic(this.Characteristic.ConfiguredName, newTitle);
         }
+      });
 
-        this.lockUpdate = true;
+      get_title.stderr.on('data', (err) => {
+        this.platform.log.error('⚠️ Error fetching title:', err.toString());
+      });
+    }, polling);
+  }
 
-        try {
-            await this.discoverDevice();
-        } catch (err) {
-            this.platform.log.error((err as Error).message);
-            // If we can't discover the device, it's probably OFF
-            this.deviceInformation.status = DeviceStatus.STANDBY;
-        } finally {
-            this.lockUpdate = false;
-            this.updateCharacteristics();
-        }
+  private async discoverDevice() {
+    const device = Device.withId(this.deviceInformation.id);
+    this.deviceInformation = await device.discover();
+    return device;
+  }
+
+  private async getOn(): Promise<CharacteristicValue> {
+    return this.deviceInformation.status === DeviceStatus.AWAKE;
+  }
+
+  private async setOn(value: CharacteristicValue) {
+    if (this.lockSetOn) {
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.RESOURCE_BUSY);
     }
 
-    private addLocks() {
-        this.lockSetOn = true;
-        this.lockUpdate = true;
-        this.lockTimeout = setTimeout(() => {
-            this.platform.log.debug(
-                `[${this.deviceInformation.id}] Removing locks due to timeout`
-            );
-            this.releaseLocks();
-        }, this.kLockTimeout);
+    this.addLocks();
+
+    try {
+      const device = await this.discoverDevice();
+
+      if (
+        (value && this.deviceInformation.status === DeviceStatus.AWAKE) ||
+        (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
+      ) {
+        return;
+      }
+
+      const connection = await device.openConnection();
+      value ? await device.wake() : await connection.standby();
+      await connection.close();
+    } catch (err) {
+      this.platform.log.error((err as Error).message);
+    } finally {
+      this.releaseLocks();
+    }
+  }
+
+  private async setTitleSwitchState(value: CharacteristicValue) {
+    const requestedTitle = this.titleIDs[value as number] || null;
+    if (!requestedTitle) return;
+
+    if (this.lockSetOn) {
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.RESOURCE_BUSY);
     }
 
-    private releaseLocks() {
-        this.lockSetOn = false;
-        this.lockUpdate = false;
-        if (this.lockTimeout) {
-            clearTimeout(this.lockTimeout);
-        }
+    this.addLocks();
+
+    try {
+      const device = await this.discoverDevice();
+
+      if (this.deviceInformation.extras['running-app-titleid'] === requestedTitle) return;
+
+      const connection = await device.openConnection();
+      await connection.startTitleId?.(requestedTitle);
+      await connection.close();
+    } catch (err) {
+      this.platform.log.error((err as Error).message);
+    } finally {
+      this.releaseLocks();
     }
+  }
 
-    private setOn(value: CharacteristicValue) {
-        this.platform.log.debug(`[${this.deviceInformation.id}] setOn ->`, value);
+  private async updateDeviceInformations(force = false) {
+    if (this.lockUpdate && !force) return;
 
-        if (this.lockSetOn) {
-            this.platform.log.info(
-                `[${this.deviceInformation.id}] Lock is active, ignoring request.\nYou're experiencing this because the previous operation is still in progress, or, less likely because the cleanup of the previous connection failed.\nThis is a Playstation and RemotePlay limitation, as opening/closing connection can take up to 20 seconds, after which the lock will be released anyway.\nTry to use the plugin as normal without hammering the switch button on/off, don't fall in the trap of the Heisenbug.`
-            );
-            throw new this.api.hap.HapStatusError(
-                this.api.hap.HAPStatus.RESOURCE_BUSY
-            );
-        }
+    this.lockUpdate = true;
 
-        this.platform.log.debug("Discovering device...");
-
-        this.addLocks();
-
-        this.discoverDevice()
-            .then(async (device) => {
-                if (
-                    (value == true &&
-                        this.deviceInformation.status === DeviceStatus.AWAKE) ||
-                    (value == false &&
-                        this.deviceInformation.status === DeviceStatus.STANDBY)
-                ) {
-                    this.platform.log.debug(
-                        `[${this.deviceInformation.id}] Already in desired state`
-                    );
-                    this.updateCharacteristics();
-                    return;
-                }
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Opening connection...`
-                );
-                const connection = await device.openConnection();
-
-                if (value) {
-                    this.platform.log.debug(
-                        `[${this.deviceInformation.id}] Waking device...`
-                    );
-                    await device.wake();
-                } else {
-                    this.platform.log.debug(
-                        `[${this.deviceInformation.id}] Standby device...`
-                    );
-                    await connection.standby();
-                }
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Closing connection...`
-                );
-                await connection.close();
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Connection closed`
-                );
-            })
-            .catch((err) => {
-                this.platform.log.error((err as Error).message);
-            })
-            .finally(() => {
-                this.releaseLocks();
-            });
+    try {
+      await this.discoverDevice();
+    } catch {
+      this.deviceInformation.status = DeviceStatus.STANDBY;
+    } finally {
+      this.lockUpdate = false;
+      this.tvService
+        .getCharacteristic(this.platform.Characteristic.Active)
+        .updateValue(this.deviceInformation.status === DeviceStatus.AWAKE);
     }
+  }
 
-    private async getOn(): Promise<CharacteristicValue> {
-        this.platform.log.debug(
-            `[${this.deviceInformation.id}] getOn is ->`,
-            this.deviceInformation.status
-        );
-        return this.deviceInformation.status === DeviceStatus.AWAKE;
+  private addLocks() {
+    this.lockSetOn = true;
+    this.lockUpdate = true;
+    this.lockTimeout = setTimeout(() => {
+      this.releaseLocks();
+    }, this.kLockTimeout);
+  }
+
+  private releaseLocks() {
+    this.lockSetOn = false;
+    this.lockUpdate = false;
+    if (this.lockTimeout) {
+      clearTimeout(this.lockTimeout);
     }
-
-    private async setTitleSwitchState(value: CharacteristicValue) {
-        this.platform.log.debug(
-            `[${this.deviceInformation.id}] setTitleSwitchState ->`,
-            value
-        );
-
-        const requestedTitle = (this.titleIDs[value as number] as string) || null;
-
-        if (!requestedTitle) {
-            this.platform.log.debug(
-                `[${this.deviceInformation.id}] No title found for index ->`,
-                value
-            );
-            return;
-        }
-
-        if (this.lockSetOn) {
-            this.platform.log.info(
-                `[${this.deviceInformation.id}] Lock is active, ignoring request.\nYou're experiencing this because the previous operation is still in progress, or, less likely because the cleanup of the previous connection failed.\nThis is a Playstation and RemotePlay limitation, as opening/closing connection can take up to 20 seconds, after which the lock will be released anyway.\nTry to use the plugin as normal without hammering the switch button on/off, don't fall in the trap of the Heisenbug.`
-            );
-            throw new this.api.hap.HapStatusError(
-                this.api.hap.HAPStatus.RESOURCE_BUSY
-            );
-        }
-
-        this.addLocks();
-
-        this.discoverDevice()
-            .then(async (device) => {
-                if (
-                    this.deviceInformation.extras["running-app-titleid"] ===
-                    requestedTitle
-                ) {
-                    this.platform.log.debug(
-                        `[${this.deviceInformation.id}] Title already running`
-                    );
-                    this.updateCharacteristics();
-                    return;
-                }
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] starting title ${requestedTitle} ...`
-                );
-                const connection = await device.openConnection();
-
-                await connection.startTitleId?.(requestedTitle);
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Closing connection...`
-                );
-                await connection.close();
-
-                this.platform.log.debug(
-                    `[${this.deviceInformation.id}] Connection closed`
-                );
-            })
-            .catch((err) => {
-                this.platform.log.error((err as Error).message);
-            })
-            .finally(() => {
-                this.releaseLocks();
-            });
-    }
+  }
 }
