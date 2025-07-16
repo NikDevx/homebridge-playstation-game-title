@@ -153,48 +153,40 @@ export class PlaystationAccessory {
     return this.deviceInformation.status === DeviceStatus.AWAKE;
   }
 
-private async setOn(value: CharacteristicValue): Promise<void> {
+private setOn(value: CharacteristicValue): void {
   if (this.lockSetOn) {
     throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.RESOURCE_BUSY);
   }
 
   this.addLocks();
 
-  try {
-    const device = await this.discoverDevice();
+  this.tvService
+    .getCharacteristic(this.Characteristic.Active)
+    .updateValue(value);
 
-    if (
-      (value && this.deviceInformation.status === DeviceStatus.AWAKE) ||
-      (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
-    ) {
-      this.platform.log.debug(`[${this.deviceInformation.id}] Already in desired state`);
-    } else {
+  void (async () => {
+    try {
+      const device = await this.discoverDevice();
       const connection = await device.openConnection();
 
       if (value) {
-        await timeout(device.wake(), 15000);
+        this.platform.log.debug(`[${this.deviceInformation.id}] Waking device...`);
+        await timeout(device.wake(), 15_000);
       } else {
-        await timeout(connection.standby(), 15000);
+        this.platform.log.debug(`[${this.deviceInformation.id}] Standby device...`);
+        await timeout(connection.standby(), 15_000);
       }
 
       await connection.close();
-    }
 
-    // 🟢 Update HomeKit state immediately after action
-    await this.updateDeviceInformations(true);
-
-  } catch (err) {
-    const message = (err as Error).message;
-    this.platform.log.error(`[${this.deviceInformation.id}] Error: ${message}`);
-
-    if (message === 'Timeout') {
-      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.OPERATION_TIMED_OUT);
-    }
-
-    throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-  } finally {
+    } catch (err) {
+      const message = (err as Error).message;
+      this.platform.log.error(`[${this.deviceInformation.id}] Background error: ${message}`);
+    } finally {
       this.releaseLocks();
+      await this.updateDeviceInformations(true); // оновлення статусу
     }
+  })();
 }
 
 
