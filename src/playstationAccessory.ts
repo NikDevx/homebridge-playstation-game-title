@@ -153,20 +153,31 @@ private async setOn(value: CharacteristicValue): Promise<void> {
       (value && this.deviceInformation.status === DeviceStatus.AWAKE) ||
       (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
     ) {
+      this.platform.log.debug(`[${this.deviceInformation.id}] Already in desired state`);
       return;
     }
 
     const connection = await device.openConnection();
-    value ? await device.wake() : await connection.standby();
+
+    if (value) {
+      await device.wake();
+    } else {
+      await connection.standby();
+    }
+
     await connection.close();
+
   } catch (err) {
     this.platform.log.error((err as Error).message);
+    throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+
   } finally {
     this.releaseLocks();
   }
 
   return;
 }
+
 
 
   private async setTitleSwitchState(value: CharacteristicValue) {
