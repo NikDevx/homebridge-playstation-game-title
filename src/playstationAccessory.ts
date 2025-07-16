@@ -139,32 +139,35 @@ export class PlaystationAccessory {
     return this.deviceInformation.status === DeviceStatus.AWAKE;
   }
 
-  private async setOn(value: CharacteristicValue) {
-    if (this.lockSetOn) {
-      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.RESOURCE_BUSY);
-    }
-
-    this.addLocks();
-
-    try {
-      const device = await this.discoverDevice();
-
-      if (
-        (value && this.deviceInformation.status === DeviceStatus.AWAKE) ||
-        (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
-      ) {
-        return;
-      }
-
-      const connection = await device.openConnection();
-      value ? await device.wake() : await connection.standby();
-      await connection.close();
-    } catch (err) {
-      this.platform.log.error((err as Error).message);
-    } finally {
-      this.releaseLocks();
-    }
+private async setOn(value: CharacteristicValue): Promise<void> {
+  if (this.lockSetOn) {
+    throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.RESOURCE_BUSY);
   }
+
+  this.addLocks();
+
+  try {
+    const device = await this.discoverDevice();
+
+    if (
+      (value && this.deviceInformation.status === DeviceStatus.AWAKE) ||
+      (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
+    ) {
+      return;
+    }
+
+    const connection = await device.openConnection();
+    value ? await device.wake() : await connection.standby();
+    await connection.close();
+  } catch (err) {
+    this.platform.log.error((err as Error).message);
+  } finally {
+    this.releaseLocks();
+  }
+
+  return;
+}
+
 
   private async setTitleSwitchState(value: CharacteristicValue) {
     const requestedTitle = this.titleIDs[value as number] || null;
@@ -186,6 +189,8 @@ export class PlaystationAccessory {
       await connection.close();
     } catch (err) {
       this.platform.log.error((err as Error).message);
+
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     } finally {
       this.releaseLocks();
     }

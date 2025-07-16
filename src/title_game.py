@@ -1,12 +1,11 @@
 import json
 import sys
-
 from psnawp_api import PSNAWP
-from psnawp_api.core import psnawp_exceptions
+from psnawp_api.core import psnawp_exceptions, psnawp_exceptions as ex
 
 try:
     PSNAWP(sys.argv[1])
-except psnawp_exceptions.PSNAWPAuthenticationError as e:
+except psnawp_exceptions.PSNAWPAuthenticationError:
     psnawp = False
     psnawp_code = "Your npsso code has expired or is incorrect. Please generate a new code!"
 else:
@@ -20,30 +19,34 @@ def user_status():
     accounts_id = sys_argvs[0].replace('["', '').replace('"]', '').replace('"', '')
     accounts_ids = accounts_id.split(',')
 
-    # game_id = "CUSAXXXXXX"
-    game_title = "Loading..."
+    game_title = "Console offline"
 
     if psnawp:
         for user in accounts_ids:
-            user_name = psnawp.user(account_id=user).account_id
-            user_info = psnawp.user(account_id=user).get_presence()
-            if user == user_name:
-                if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] == "online":
-                    if "gameTitleInfoList" in user_info["basicPresence"]:
-                        # game_id = user_info["basicPresence"]["gameTitleInfoList"][0]["npTitleId"]
-                        game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
-                    else:
-                        game_title = "Not playing"
+            try:
+                user_obj = psnawp.user(account_id=user)
+                user_info = user_obj.get_presence()
 
-                    break
+                if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] != "online":
+                    continue  # Пропускаємо, якщо не онлайн
+
+                if "gameTitleInfoList" in user_info["basicPresence"]:
+                    game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
                 else:
-                    game_title = "Offline status"
+                    game_title = "Not playing"
 
+                break  # зупиняємось після першого активного
+            except ex.PSNAWPTooManyRequests:
+                game_title = "Too many requests — slowing down"
+                break
+            except Exception as e:
+                game_title = f"Error: {str(e)}"
+                break
     else:
-        if psnawp_code == "Your npsso code has expired or is incorrect. Please generate a new code!":
-            game_title = "NPSSO code has expired or incorrect! Replace it!"
+        if psnawp_code:
+            game_title = psnawp_code
         else:
-            game_title = "Something went wrong while authenticating!"
+            game_title = "Authentication error"
 
     return game_title
 
