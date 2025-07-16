@@ -14,6 +14,19 @@ import { PlaystationPlatform } from './playstationPlatform';
 import { PLUGIN_NAME } from './settings';
 import { spawn } from 'child_process';
 
+function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout')), ms);
+    promise.then((val) => {
+      clearTimeout(timer);
+      resolve(val);
+    }).catch((err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 export class PlaystationAccessory {
   private readonly accessory: PlatformAccessory;
   private readonly tvService: Service;
@@ -83,6 +96,7 @@ export class PlaystationAccessory {
 
     this.api.publishExternalAccessories(PLUGIN_NAME, [this.accessory]);
   }
+
 
   private addTitle(titleId: string, titleName: string, index: number) {
     const titleInputSource = new this.Service.InputSource(titleName, titleId);
@@ -154,30 +168,34 @@ private async setOn(value: CharacteristicValue): Promise<void> {
       (!value && this.deviceInformation.status === DeviceStatus.STANDBY)
     ) {
       this.platform.log.debug(`[${this.deviceInformation.id}] Already in desired state`);
-      return;
-    }
-
-    const connection = await device.openConnection();
-
-    if (value) {
-      await device.wake();
     } else {
-      await connection.standby();
+      const connection = await device.openConnection();
+
+      if (value) {
+        await timeout(device.wake(), 15000);
+      } else {
+        await timeout(connection.standby(), 15000);
+      }
+
+      await connection.close();
     }
 
-    await connection.close();
+    // 🟢 Update HomeKit state immediately after action
+    await this.updateDeviceInformations(true);
 
   } catch (err) {
-    this.platform.log.error((err as Error).message);
+    const message = (err as Error).message;
+    this.platform.log.error(`[${this.deviceInformation.id}] Error: ${message}`);
+
+    if (message === 'Timeout') {
+      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.OPERATION_TIMED_OUT);
+    }
+
     throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-
   } finally {
-    this.releaseLocks();
-  }
-
-  return;
+      this.releaseLocks();
+    }
 }
-
 
 
   private async setTitleSwitchState(value: CharacteristicValue) {
@@ -200,8 +218,6 @@ private async setOn(value: CharacteristicValue): Promise<void> {
       await connection.close();
     } catch (err) {
       this.platform.log.error((err as Error).message);
-
-      throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     } finally {
       this.releaseLocks();
     }
