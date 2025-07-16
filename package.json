@@ -1,7 +1,7 @@
 {
   "displayName": "Homebridge Playstation",
   "name": "homebridge-playstation-game-title",
-  "version": "1.1.1",
+  "version": "1.2",
   "description": "Playstation integration for Homebridge",
   "license": "Apache-2.0",
   "repository": {
@@ -11,7 +11,8 @@
   "files": [
     "dist",
     "LICENSE",
-    "config.schema.json"
+    "config.schema.json",
+    "src/title_game.py"
   ],
   "bugs": {
     "url": "https://github.com/NikDevx/homebridge-playstation-game-title/issues"

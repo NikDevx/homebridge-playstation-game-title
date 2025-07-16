@@ -5,6 +5,7 @@ import {
   PlatformAccessory,
   Service,
 } from 'homebridge';
+import path from 'path';
 
 import { Device } from 'playactor/dist/device';
 import { DeviceStatus, IDiscoveredDevice } from 'playactor/dist/discovery/model';
@@ -108,11 +109,8 @@ export class PlaystationAccessory {
     if (this.titleUpdateInterval) clearInterval(this.titleUpdateInterval);
 
     this.titleUpdateInterval = setInterval(() => {
-      const get_title = spawn('python3', [
-        '/usr/lib/node_modules/homebridge-playstation-game-title/dist/title_game.py',
-        PSNAWP,
-        JSON.stringify(account_ids),
-      ]);
+      const scriptPath = path.join(__dirname, 'title_game.py');
+      const get_title = spawn('python3', [scriptPath, PSNAWP, JSON.stringify(account_ids)]);
 
       get_title.stdout.on('data', (data) => {
         const newTitle = data.toString().trim();
