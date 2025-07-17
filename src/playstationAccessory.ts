@@ -167,27 +167,48 @@ private setOn(value: CharacteristicValue): void {
   void (async () => {
     try {
       const device = await this.discoverDevice();
-      const connection = await device.openConnection();
+      this.deviceInformation = await device.discover();
 
-      if (value) {
-        this.platform.log.debug(`[${this.deviceInformation.id}] Waking device...`);
-        await timeout(device.wake(), 15_000);
-      } else {
-        this.platform.log.debug(`[${this.deviceInformation.id}] Standby device...`);
-        await timeout(connection.standby(), 15_000);
+      const currentStatus = this.deviceInformation.status;
+      const desiredStatus = value ? DeviceStatus.AWAKE : DeviceStatus.STANDBY;
+
+      if (currentStatus === desiredStatus) {
+        this.platform.log.debug(`[${this.deviceInformation.id}] Already in desired state`);
+        return;
       }
 
-      await connection.close();
+      try {
+        const connection = await device.openConnection();
+
+        if (value) {
+          this.platform.log.debug(`[${this.deviceInformation.id}] Waking device...`);
+          await timeout(device.wake(), 15_000);
+        } else {
+          this.platform.log.debug(`[${this.deviceInformation.id}] Sending standby...`);
+          await timeout(connection.standby(), 15_000);
+        }
+
+        await connection.close();
+      } catch (err) {
+        const message = (err as Error).message;
+        if (message.includes('403') && message.includes('Remote is already in use')) {
+          this.platform.log.warn(`[${this.deviceInformation.id}] Remote already in use — assuming console is on.`);
+          await this.updateDeviceInformations(true);
+        } else {
+          throw err;
+        }
+      }
 
     } catch (err) {
       const message = (err as Error).message;
       this.platform.log.error(`[${this.deviceInformation.id}] Background error: ${message}`);
     } finally {
       this.releaseLocks();
-      await this.updateDeviceInformations(true); // оновлення статусу
+      await this.updateDeviceInformations(true);
     }
   })();
 }
+
 
 
   private async setTitleSwitchState(value: CharacteristicValue) {
