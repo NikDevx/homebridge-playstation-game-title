@@ -160,6 +160,7 @@ private setOn(value: CharacteristicValue): void {
 
   this.addLocks();
 
+  // 🔄 UI одразу реагує
   this.tvService
     .getCharacteristic(this.Characteristic.Active)
     .updateValue(value);
@@ -191,12 +192,14 @@ private setOn(value: CharacteristicValue): void {
         await connection.close();
       } catch (err) {
         const message = (err as Error).message;
-        if (message.includes('403') && message.includes('Remote is already in use')) {
-          this.platform.log.warn(`[${this.deviceInformation.id}] Remote already in use — assuming console is on.`);
+
+        if (!value && message.includes('403') && message.includes('Remote is already in use')) {
+          this.platform.log.warn(`[${this.deviceInformation.id}] Remote already in use — assuming console already in standby.`);
           await this.updateDeviceInformations(true);
-        } else {
-          throw err;
+          return;
         }
+
+        throw err;
       }
 
     } catch (err) {
@@ -208,6 +211,7 @@ private setOn(value: CharacteristicValue): void {
     }
   })();
 }
+
 
 
 
