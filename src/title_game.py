@@ -1,54 +1,52 @@
 import json
 import sys
+import traceback
 from psnawp_api import PSNAWP
-from psnawp_api.core import psnawp_exceptions, psnawp_exceptions as ex
-
-try:
-    PSNAWP(sys.argv[1])
-except psnawp_exceptions.PSNAWPAuthenticationError:
-    psnawp = False
-    psnawp_code = "Your npsso code has expired or is incorrect. Please generate a new code!"
-else:
-    psnawp = PSNAWP(sys.argv[1])
-    client = psnawp.me()
+from psnawp_api.core import psnawp_exceptions
 
 
-def user_status():
-    sys_argvs = sys.argv
-    del sys_argvs[0:2]
-    accounts_id = sys_argvs[0].replace('["', '').replace('"]', '').replace('"', '')
-    accounts_ids = accounts_id.split(',')
+def main():
+    try:
+        psnawp = PSNAWP(sys.argv[1])
+    except psnawp_exceptions.PSNAWPAuthenticationError:
+        print("Console offline")
+        sys.exit(1)
 
-    game_title = "Console offline"
+    try:
+        sys_argvs = sys.argv
+        account_ids_raw = sys_argvs[2].replace('["', '').replace('"]', '').replace('"', '')
+        account_ids = account_ids_raw.split(',')
 
-    if psnawp:
-        for user in accounts_ids:
+        for account_id in account_ids:
             try:
-                user_obj = psnawp.user(account_id=user)
-                user_info = user_obj.get_presence()
+                user = psnawp.user(account_id=account_id)
+                presence = user.get_presence()
 
-                if user_info["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] != "online":
-                    continue  # Пропускаємо, якщо не онлайн
+                if presence["basicPresence"]["primaryPlatformInfo"]["onlineStatus"] != "online":
+                    continue
 
-                if "gameTitleInfoList" in user_info["basicPresence"]:
-                    game_title = user_info["basicPresence"]["gameTitleInfoList"][0]["titleName"]
+                if "gameTitleInfoList" in presence["basicPresence"]:
+                    title = presence["basicPresence"]["gameTitleInfoList"][0]["titleName"]
+                    print(title[:63])
+                    return
                 else:
-                    game_title = "Not playing"
+                    print("Not playing")
+                    return
 
-                break  # зупиняємось після першого активного
-            except ex.PSNAWPTooManyRequests:
-                game_title = "Too many requests — slowing down"
-                break
+            except psnawp_exceptions.PSNAWPTooManyRequests:
+                print("Console offline")
+                return
             except Exception as e:
-                game_title = f"Error: {str(e)}"
-                break
-    else:
-        if psnawp_code:
-            game_title = psnawp_code
-        else:
-            game_title = "Authentication error"
+                print("Console offline")
+                return
 
-    return game_title
+        print("Console offline")
+
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        print("Console offline")
+        sys.exit(1)
 
 
-print(user_status())
+if __name__ == "__main__":
+    main()
